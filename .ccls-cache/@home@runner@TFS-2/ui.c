@@ -44,7 +44,7 @@ char **parse_command(char *command, char *whitespace) {
 }
 
 void import_file(char **tokens) {
-  // Check that path exists as third argument
+  // Check that there are the appropriate amount of arguments in command
   if (tokens[2] == NULL) {
     printf("No path was provided for new file");
     return;
@@ -59,23 +59,25 @@ void import_file(char **tokens) {
     return;
   }
 
-  // Break up LP path into array of names
-  char **lpPath = parse_command(tokens[2], "/");
+  // TODO: don't think I need this bit, should use pathname rather than
+  // // Break up LP path into array of names
+  // char **lpPath = parse_command(tokens[2], "/");
 
-  // Get index of last item in LP path
-  int lastIndex = 0;
-  while (lpPath[lastIndex] != NULL) {
-    lastIndex++;
-  }
-  lastIndex -= 1;
+  // just the name to open and do stat
+  // // Get index of last item in LP path
+  // int lastIndex = 0;
+  // while (lpPath[lastIndex] != NULL) {
+  //   lastIndex++;
+  // }
+  // lastIndex -= 1;
 
-  // Get name of LP file
-  char lpName[1];
-  strncpy(lpName, lpPath[lastIndex], 1);
+  // // Get name of LP file
+  // char lpName[1];
+  // strncpy(lpName, lpPath[lastIndex], 1);
 
   // Use stat to get LP file size
   struct stat st;
-  int success = stat(lpName, &st);
+  int success = stat(tokens[1], &st);
   off_t fileSize = st.st_size;
   // Make sure stat call was successful
   if (success != 0) {
@@ -85,31 +87,52 @@ void import_file(char **tokens) {
 
   // Check how many blocks will be needed to hold LP file
   int remainder = fileSize % 15;
-  int blocksNeeded = fileSize / 15;
+  int blocksNeeded = (fileSize / 15);
   if (remainder > 0)
     blocksNeeded++;
-  // TODO: Check there are enough free blocks to hold file, add
-  // indices of next few free blocks to use into an int array
-  // Use isUsed drive method to check, add to counter and list of
-  // int block array along the way. If counter is less than
-  // blocksNeeded, display error and return
+  // If blocksNeeded > 1, add extra block for file index block
+  if (blocksNeeded > 1)
+    blocksNeeded++;
+  // Check there are enough free blocks to hold file contents
+  // Add free block #s to be used for file to array
+  int newBlockIndices[blocksNeeded];
+  int freeBlocks = 0;
+  for (int i = 1; i < 16; i++) {
+    if (freeBlocks == blocksNeeded) {
+      i = 16;
+    } else if (!isUsed(currentDrive, i)) {
+      newBlockIndices[freeBlocks] = i;
+      freeBlocks++;
+    }
+  }
+  // Make sure there is enough space in TFS to fit file contents
+  if (freeBlocks < blocksNeeded) {
+    printf("Not enough space in TFS Disk to fit file contents.\n");
+    return;
+  }
 
-  // TODO: Allocate space to read file (using filesize from stat)
+  // Allocate space to read file (using filesize from stat)
   char *fileContents = malloc(fileSize);
 
-  // Close and save currentFile, use prexxisting code??
+  // TODO: Close and save currentFile, use prexxisting code??
   // Not sure if can have multiple open at once
-  // open the file (maybe in a separate variable, if possible so I can reopen
-  // currentFile later); Check that path and file is valid by
-  // looking at return val of open
-  // Read file to buffer (Char by char into each byte)
+
+  // open the file to import
+  fileToImport = open(tokens[1], O_RDONLY);
+  // Check file opened properly
+  if (fileToImport == -1) {
+    printf("Error when attempting to open specified file to import.");
+  }
 
   // Check for first free spot in parent directory to put file
   int parDirIndex = findFreeSpot(currentDrive->block[parentBlock][2], 8) + 3;
-  // TODO: check there IS a free spot, if not error
+  if (parDirIndex < 3) {
+    printf("Specified parent directory does not have free space to put file");
+    return;
+  }
 
   // Get index of last item in TFS path
-  lastIndex = 0;
+  int lastIndex = 0;
   while (tfsPath[lastIndex] != NULL) {
     lastIndex++;
   }
@@ -125,16 +148,83 @@ void import_file(char **tokens) {
   // Update free space bitmap
   currentDrive->block[parentBlock][2] |= 1 << (parDirIndex - 3);
 
-  // TODO: update parent directory block pointer
+  // Update parent directory block pointer
+  parDirIndex -= 3;
+  int isEven = parDirIndex % 2;
 
-  // TODO: Use buffer to write file info into the TFS disk at the
-  // specified indices, using the int array of block indices
-  // If array == 1 then do it differently.
+  if (!isEven) {
+    // This math is so it will go in the proper block pointer spot at the end
+    int newIndex = parDirIndex;
+    newIndex = (8 - newIndex) / 2;
+    newIndex = 16 - newIndex;
+    // Do the math to see what number the byte should display
+    int r = (currentDrive->block[parentBlock][newIndex] / 10) * 10;
+    r += newBlockIndices[0];
+    // Intended to set char b to the char of a specific ascii value, but it only
+    // works sometimes, i dunno why.
+    char b = NULL;
+    b += r;
+    currentDrive->block[parentBlock][newIndex] = b;
+  } else {
+    int newIndex = parDirIndex;
+    newIndex = (8 - newIndex) / 2;
+    newIndex = 15 - newIndex;
+
+    int r = currentDrive->block[parentBlock][newIndex];
+    r = r % 10;
+    r += newBlockIndices[0] * 10;
+    char b = NULL;
+    b += r;
+    currentDrive->block[parentBlock][newIndex] = b;
+  }
+
+  // Read file into TFS disk byte by byte
+  if (blocksNeeded == 1) {
+    // Set file size in byte 0
+    currentDrive->block[newBlockIndices[0]][0] = fileSize;
+    for (int i = 1; i < blocksNeeded; i++) {
+      // Set block numbers of file's data blocks in index
+      currentDrive->block[newBlockIndices[0]][i] = newBlockIndices[i];
+    }
+  } else {
+    // If more than one block needed
+    // INDEX BLOCK
+    // Set file size in byte 0
+    currentDrive->block[newBlockIndices[0]][0] = fileSize;
+    // Set pointers to blocks holding data in blocks 1-15
+    for (int i = 1; i < blocksNeeded; i++) {
+      // Set block numbers of file's data blocks in index
+      currentDrive->block[newBlockIndices[0]][i] = newBlockIndices[i];
+      // Set data in current file block
+      for (int j = 1; j < 16; j++) {
+        unsigned char b[1];
+        read(currentFile, b, 1);
+        currentDrive->block[newBlockIndices[i]][j] = b[0];
+      }
+    }
+  }
 
   // Save drive to file
   close(currentFile);
   currentFile = open(currentName, O_RDWR);
   saveDriveToFile();
+}
+
+void export_file(char **tokens) {
+  // Check that there are the appropriate amount of arguments in command
+  if (tokens[2] == NULL) {
+    printf("No path was provided for new file");
+    return;
+  }
+
+  // Break up TFS path into array of names
+  char **tfsPath = parse_command(tokens[2], "/");
+  // Check that path is valid and get block of parent directory
+  int parentBlock = getBlock(tfsPath);
+  if (parentBlock == -1) {
+    printf("Path invalid");
+    return;
+  }
 }
 
 void list_contents(char **tokens) {
@@ -238,7 +328,6 @@ Drive *open_file(char **tokens) {
           (int)b[0]; // TODO: should only cast if it's actually an int
     }
   }
-  printf("%s", displayDrive(currentDrive));
   for (int i = 0; i < 16; i++) {
     printf("block %d is used: %d\n", i, isUsed(currentDrive, i));
   }
@@ -399,6 +488,7 @@ void makeDirectory(char **tokens) {
   strncpy(newDir, path[lastIndex], 1);
   currentDrive->block[parentBlock][parDirIndex] = path[lastIndex][0];
 
+  // Update parent block pointer
   // Update block pointer
   parDirIndex -= 3;
   int isEven = parDirIndex % 2;

@@ -20,6 +20,8 @@ int main(int argc, char **argv) {
     exit = !(strcmp(tokens[0], "exit"));
     if (!(strcmp(tokens[0], "import")))
       import_file(tokens);
+    else if (!(strcmp(tokens[0], "export")))
+      export_file(tokens);
     else if (!strcmp(tokens[0], "ls"))
       list_contents(tokens);
     else if (!strcmp(tokens[0], "display")) {

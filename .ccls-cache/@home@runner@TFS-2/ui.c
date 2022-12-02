@@ -54,6 +54,7 @@ void import_file(char **tokens) {
   char **tfsPath = parse_command(tokens[2], "/");
   // Check that path is valid and get block of parent directory
   int parentBlock = getBlock(tfsPath);
+  printf("parentBlock: %d\n", parentBlock);
   if (parentBlock == -1) {
     printf("Path invalid");
     return;
@@ -90,6 +91,7 @@ void import_file(char **tokens) {
   int blocksNeeded = (fileSize / 15);
   if (remainder > 0)
     blocksNeeded++;
+  printf("blocksNeeded: %d\n", blocksNeeded);
   // If blocksNeeded > 1, add extra block for file index block
   if (blocksNeeded > 1)
     blocksNeeded++;
@@ -102,6 +104,7 @@ void import_file(char **tokens) {
       i = 16;
     } else if (!isUsed(currentDrive, i)) {
       newBlockIndices[freeBlocks] = i;
+      printf("newBlockIndices[freeBlocks]: %d\n", newBlockIndices[freeBlocks]);
       freeBlocks++;
     }
   }
@@ -122,11 +125,15 @@ void import_file(char **tokens) {
   // Check file opened properly
   if (fileToImport == -1) {
     printf("Error when attempting to open specified file to import.");
+    return;
   }
 
   // Check for first free spot in parent directory to put file
   int parDirIndex = findFreeSpot(currentDrive->block[parentBlock][2], 8) + 3;
   if (parDirIndex < 3) {
+    // close the file to import
+    close(fileToImport);
+    fileToImport = -1;
     printf("Specified parent directory does not have free space to put file");
     return;
   }
@@ -141,16 +148,32 @@ void import_file(char **tokens) {
   // Get name of TFS file
   char tfsName[1];
   strncpy(tfsName, tfsPath[lastIndex], 1);
+  // Check that name is valid
+  if (tfsName[0] < 'a' || tfsName[0] > 'z') {
+    printf("Invalid file name for TFS disk\n");
+    return;
+  }
 
   // Set the correct index of directory to file name
   currentDrive->block[parentBlock][parDirIndex] = tfsName[0];
 
-  // Update free space bitmap
+  // Update parent directory entry bitmap
   currentDrive->block[parentBlock][2] |= 1 << (parDirIndex - 3);
 
+  // update the root freespace bitmap to remove file blocks
+  for (int i = 0; i < blocksNeeded; i++) {
+    unsigned short bitmap = 0;
+    memcpy(&bitmap, currentDrive->block[0], 2);
+    unsigned short mask = 1;
+    mask = mask << newBlockIndices[i];
+    currentDrive->block[0][0] |= 1 << newBlockIndices[i];
+  }
+
   // Update parent directory block pointer
+  printf("ln 158 parDirIndex: %d\n", parDirIndex);
   parDirIndex -= 3;
   int isEven = parDirIndex % 2;
+  printf("ln 161 parDirIndex: %d\n", parDirIndex);
 
   if (!isEven) {
     // This math is so it will go in the proper block pointer spot at the end
@@ -160,11 +183,16 @@ void import_file(char **tokens) {
     // Do the math to see what number the byte should display
     int r = (currentDrive->block[parentBlock][newIndex] / 10) * 10;
     r += newBlockIndices[0];
+    printf("ln 171 r: %d\n", r);
     // Intended to set char b to the char of a specific ascii value, but it only
     // works sometimes, i dunno why.
     char b = NULL;
+    printf("ln 177 b: %d\n", b);
     b += r;
-    currentDrive->block[parentBlock][newIndex] = b;
+    printf("ln 177 b: %c\n", b);
+    currentDrive->block[parentBlock][newIndex] = (unsigned char)b;
+    printf("ln 177 drive value: %c",
+           currentDrive->block[parentBlock][newIndex]);
   } else {
     int newIndex = parDirIndex;
     newIndex = (8 - newIndex) / 2;
@@ -173,36 +201,49 @@ void import_file(char **tokens) {
     int r = currentDrive->block[parentBlock][newIndex];
     r = r % 10;
     r += newBlockIndices[0] * 10;
+    printf("ln 188 r: %d\n", r);
     char b = NULL;
+    printf("ln 177 b: %d\n", b);
     b += r;
-    currentDrive->block[parentBlock][newIndex] = b;
+    printf("ln 191 b: %c\n", b);
+    currentDrive->block[parentBlock][newIndex] = (unsigned char)b;
+    printf("ln 193 drive value: %c",
+           currentDrive->block[parentBlock][newIndex]);
   }
 
   // Read file into TFS disk byte by byte
   if (blocksNeeded == 1) {
     // Set file size in byte 0
-    currentDrive->block[newBlockIndices[0]][0] = fileSize;
-    for (int i = 1; i < blocksNeeded; i++) {
-      // Set block numbers of file's data blocks in index
-      currentDrive->block[newBlockIndices[0]][i] = newBlockIndices[i];
+    currentDrive->block[newBlockIndices[0]][0] = (int)fileSize;
+    for (int i = 1; i < fileSize + 1; i++) {
+      // Set data in file block
+      char b[1];
+      // TODO: not reading file properly.
+      read(fileToImport, b, 1);
+      printf("current char from file: %c", b[0]);
+      currentDrive->block[newBlockIndices[0]][i] = b[0];
     }
   } else {
     // If more than one block needed
     // INDEX BLOCK
     // Set file size in byte 0
-    currentDrive->block[newBlockIndices[0]][0] = fileSize;
+    currentDrive->block[newBlockIndices[0]][0] = (int)fileSize;
     // Set pointers to blocks holding data in blocks 1-15
-    for (int i = 1; i < blocksNeeded; i++) {
+    for (int i = 1; i < blocksNeeded + 1; i++) {
       // Set block numbers of file's data blocks in index
       currentDrive->block[newBlockIndices[0]][i] = newBlockIndices[i];
       // Set data in current file block
       for (int j = 1; j < 16; j++) {
         unsigned char b[1];
-        read(currentFile, b, 1);
-        currentDrive->block[newBlockIndices[i]][j] = b[0];
+        if (read(fileToImport, b, 1) != 0)
+          currentDrive->block[newBlockIndices[i]][j] = b[0];
       }
     }
   }
+
+  // close the file to import
+  close(fileToImport);
+  fileToImport = -1;
 
   // Save drive to file
   close(currentFile);
@@ -394,7 +435,6 @@ int getBlock(char **path) {
   // Last valid index should be name of new directory/file
   while (path[currNameIndex + 1] != NULL) {
     currentName = path[index];
-
     // Every pathname must have length of 1
     // And be valid uppercase letter
     if (strlen(currentName) > 1 || currentName[0] < 'A' ||
@@ -409,7 +449,7 @@ int getBlock(char **path) {
       currentByte++;
     }
     // If went through entire list without finding, display error
-    if (currentByte == 10 &&
+    if (currentByte == 11 &&
         currentName[0] != currentDrive->block[currentBlock][currentByte]) {
       printf("Directory %c not found in path", currentName[0]);
       return -1;

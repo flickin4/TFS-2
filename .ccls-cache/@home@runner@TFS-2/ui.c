@@ -54,27 +54,10 @@ void import_file(char **tokens) {
   char **tfsPath = parse_command(tokens[2], "/");
   // Check that path is valid and get block of parent directory
   int parentBlock = getBlock(tfsPath);
-  printf("parentBlock: %d\n", parentBlock);
   if (parentBlock == -1) {
     printf("Path invalid");
     return;
   }
-
-  // TODO: don't think I need this bit, should use pathname rather than
-  // // Break up LP path into array of names
-  // char **lpPath = parse_command(tokens[2], "/");
-
-  // just the name to open and do stat
-  // // Get index of last item in LP path
-  // int lastIndex = 0;
-  // while (lpPath[lastIndex] != NULL) {
-  //   lastIndex++;
-  // }
-  // lastIndex -= 1;
-
-  // // Get name of LP file
-  // char lpName[1];
-  // strncpy(lpName, lpPath[lastIndex], 1);
 
   // Use stat to get LP file size
   struct stat st;
@@ -91,7 +74,6 @@ void import_file(char **tokens) {
   int blocksNeeded = (fileSize / 15);
   if (remainder > 0)
     blocksNeeded++;
-  printf("blocksNeeded: %d\n", blocksNeeded);
   // If blocksNeeded > 1, add extra block for file index block
   if (blocksNeeded > 1)
     blocksNeeded++;
@@ -104,7 +86,6 @@ void import_file(char **tokens) {
       i = 16;
     } else if (!isUsed(currentDrive, i)) {
       newBlockIndices[freeBlocks] = i;
-      printf("newBlockIndices[freeBlocks]: %d\n", newBlockIndices[freeBlocks]);
       freeBlocks++;
     }
   }
@@ -116,9 +97,6 @@ void import_file(char **tokens) {
 
   // Allocate space to read file (using filesize from stat)
   char *fileContents = malloc(fileSize);
-
-  // TODO: Close and save currentFile, use prexxisting code??
-  // Not sure if can have multiple open at once
 
   // open the file to import
   fileToImport = open(tokens[1], O_RDONLY);
@@ -170,10 +148,8 @@ void import_file(char **tokens) {
   }
 
   // Update parent directory block pointer
-  printf("ln 158 parDirIndex: %d\n", parDirIndex);
   parDirIndex -= 3;
   int isEven = parDirIndex % 2;
-  printf("ln 161 parDirIndex: %d\n", parDirIndex);
 
   if (!isEven) {
     // This math is so it will go in the proper block pointer spot at the end
@@ -183,32 +159,15 @@ void import_file(char **tokens) {
     // Do the math to see what number the byte should display
     int r = (currentDrive->block[parentBlock][newIndex] / 10) * 10;
     r += newBlockIndices[0];
-    printf("ln 171 r: %d\n", r);
-    // Intended to set char b to the char of a specific ascii value, but it only
-    // works sometimes, i dunno why.
-    char b = NULL;
-    printf("ln 177 b: %d\n", b);
-    b += r;
-    printf("ln 177 b: %c\n", b);
-    currentDrive->block[parentBlock][newIndex] = (unsigned char)b;
-    printf("ln 177 drive value: %c",
-           currentDrive->block[parentBlock][newIndex]);
+    currentDrive->block[parentBlock][newIndex] = r;
   } else {
     int newIndex = parDirIndex;
     newIndex = (8 - newIndex) / 2;
     newIndex = 15 - newIndex;
-
     int r = currentDrive->block[parentBlock][newIndex];
     r = r % 10;
     r += newBlockIndices[0] * 10;
-    printf("ln 188 r: %d\n", r);
-    char b = NULL;
-    printf("ln 177 b: %d\n", b);
-    b += r;
-    printf("ln 191 b: %c\n", b);
-    currentDrive->block[parentBlock][newIndex] = (unsigned char)b;
-    printf("ln 193 drive value: %c",
-           currentDrive->block[parentBlock][newIndex]);
+    currentDrive->block[parentBlock][newIndex] = r;
   }
 
   // Read file into TFS disk byte by byte
@@ -218,9 +177,7 @@ void import_file(char **tokens) {
     for (int i = 1; i < fileSize + 1; i++) {
       // Set data in file block
       char b[1];
-      // TODO: not reading file properly.
       read(fileToImport, b, 1);
-      printf("current char from file: %c", b[0]);
       currentDrive->block[newBlockIndices[0]][i] = b[0];
     }
   } else {
@@ -539,26 +496,20 @@ void makeDirectory(char **tokens) {
     newIndex = (8 - newIndex) / 2;
     newIndex = 16 - newIndex;
     // Do the math to see what number the byte should display
-    int r = (currentDrive->block[parentBlock][newIndex] / 10) * 10;
-    r += blockIndex;
-    // Intended to set char b to the char of a specific ascii value, but it only
-    // works sometimes, i dunno why.
-    char b = NULL;
-    b += r;
-    currentDrive->block[parentBlock][newIndex] = b;
+    int blockPtr = (currentDrive->block[parentBlock][newIndex] / 10) * 10;
+    blockPtr += blockIndex;
+    currentDrive->block[parentBlock][newIndex] = blockPtr;
   } else {
     int newIndex = parDirIndex;
     newIndex = (8 - newIndex) / 2;
     newIndex = 15 - newIndex;
 
-    int r = currentDrive->block[parentBlock][newIndex];
-    r = r % 10;
-    r += blockIndex * 10;
-    char b = NULL;
-    b += r;
-    currentDrive->block[parentBlock][newIndex] = b;
+    int blockPtr = currentDrive->block[parentBlock][newIndex];
+    blockPtr = blockPtr % 10;
+    blockPtr += blockIndex * 10;
+    currentDrive->block[parentBlock][newIndex] = blockPtr;
   }
-  // initialize the bitmap and parent pointer of the new directory block
+  // TODO: initialize the bitmap and parent pointer of the new directory block
   // ^It was mentioned that we don't need to do this last step
 
   // Save drive to file

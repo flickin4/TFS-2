@@ -2,7 +2,6 @@
 #include <stdio.h>
 
 int main(int argc, char **argv) {
-  // TODO: Optional parameter for file name to open on a.out
   Drive *d = newDrive();
   if (argc > 1) {
     d = open_file(argv);

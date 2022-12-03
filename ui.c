@@ -215,14 +215,116 @@ void export_file(char **tokens) {
     return;
   }
 
+  // Open file to import to for read and write
+  fileToImport = open(tokens[2], O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+  if (fileToImport == -1) {
+    printf("Couldn't properly open file to write to.");
+    return;
+  }
+
+	printf("before parse_command\n");
+	fflush(stdout);
+
   // Break up TFS path into array of names
-  char **tfsPath = parse_command(tokens[2], "/");
+  char **tfsPath = parse_command(tokens[1], "/");
   // Check that path is valid and get block of parent directory
   int parentBlock = getBlock(tfsPath);
   if (parentBlock == -1) {
     printf("Path invalid");
     return;
   }
+
+  // Get index of last item in TFS path
+  int lastIndex = 0;
+  while (tfsPath[lastIndex] != NULL) {
+    lastIndex++;
+  }
+  lastIndex -= 1;
+
+  // Get name of TFS file
+  char tfsName[1];
+  strncpy(tfsName, tfsPath[lastIndex], 1);
+  // Check that name is valid
+  if (tfsName[0] < 'a' || tfsName[0] > 'z') {
+    printf("Invalid file name for TFS disk\n");
+    return;
+  }
+
+  // Search for tfsName in directory
+  // Loop through directory and display all entries that arent set to 0
+  int currentByte = 3;
+  while (currentByte < 11) {
+    if (currentDrive->block[parentBlock][currentByte] == tfsName[0]) {
+      break; // TODO: make sure this works
+    }
+    currentByte++;
+  }
+
+  int fileBlock;
+
+  // Get block number of file
+  int isEven = currentByte % 2;
+  currentByte = currentByte / 2 + 11;
+  if (!isEven) {
+    int bl = currentDrive->block[parentBlock][currentByte];
+    bl = bl / 10;
+    fileBlock = currentDrive->block[parentBlock][currentByte] / 10;
+  } else {
+    int bl = currentDrive->block[parentBlock][currentByte];
+    bl = bl % 10;
+    fileBlock = currentDrive->block[parentBlock][currentByte] % 10;
+  }
+
+  // Get file size and determine how many blocks it uses
+  int fileSize = currentDrive->block[fileBlock][0];
+  int remainder = fileSize % 15;
+  int blocksNeeded = (fileSize / 15);
+  if (remainder > 0)
+    blocksNeeded++;
+  // If blocksNeeded > 1, add extra block for file index block
+  if (blocksNeeded > 1)
+    blocksNeeded++;
+
+  // Create buffer to hold file contents
+  unsigned char *fileContents = malloc(fileSize);
+
+  // Read virtual file into buffer
+  if (blocksNeeded == 1) {
+    // Add free block #s to be used for file to array
+    int fileBlocks[blocksNeeded];
+    int index = 0;
+    for (int i = 1; i < 16; i++) {
+      // TODO: Not sure if ==0 will work
+      if (currentDrive->block[fileBlock][i] == 0) {
+        i = 16;
+      } else {
+        fileBlocks[index] = currentDrive->block[fileBlocks[fileBlock]][i];
+        index++;
+      }
+    }
+
+    // Read file contents into buffer
+    int currIndex = 0;
+    for (int i = 0; i < fileSize; i++) {
+      for (int j = 1; j < 16; j++) {
+        fileContents[currIndex] = currentDrive->block[fileBlocks[i]][j];
+        currIndex++;
+      }
+    }
+  } else {
+    int currIndex = 0;
+    for (int j = 1; j < 16; j++) {
+      fileContents[currIndex] = currentDrive->block[fileBlock][j];
+      currIndex++;
+    }
+  }
+
+  // write buffer to real file system
+  write(fileToImport, fileContents, fileSize);
+
+  // Close LP file
+  close(fileToImport);
+  fileToImport = -1;
 }
 
 void list_contents(char **tokens) {
@@ -325,9 +427,6 @@ Drive *open_file(char **tokens) {
       currentDrive->block[i][j] =
           (int)b[0]; // TODO: should only cast if it's actually an int
     }
-  }
-  for (int i = 0; i < 16; i++) {
-    printf("block %d is used: %d\n", i, isUsed(currentDrive, i));
   }
   // } else {
   //   printf("Error, file size is invalid.\n");

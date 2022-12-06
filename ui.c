@@ -52,9 +52,6 @@ void import_file(char **tokens) {
 
   // Break up TFS path into array of names
   char **tfsPath = parse_command(tokens[2], "/");
-  printf("tfsPath 0: %s\n", tfsPath[0]);
-  printf("tfsPath 1: %s\n", tfsPath[1]);
-  printf("tfsPath 2: %s\n", tfsPath[2]);
   // Check that path is valid and get block of parent directory
   int parentBlock = getBlock(tfsPath);
   printf("parent block: %d\n", parentBlock);
@@ -226,9 +223,6 @@ void export_file(char **tokens) {
     return;
   }
 
-  printf("before parse_command\n");
-  fflush(stdout);
-
   // Break up TFS path into array of names
   char **tfsPath = parse_command(tokens[1], "/");
   // Check that path is valid and get block of parent directory
@@ -237,9 +231,6 @@ void export_file(char **tokens) {
     printf("Path invalid");
     return;
   }
-
-  printf("parentBlock: %d\n", parentBlock);
-  fflush(stdout);
 
   // Get index of last item in TFS path
   int lastIndex = 0;
@@ -256,8 +247,6 @@ void export_file(char **tokens) {
     printf("Invalid file name for TFS disk\n");
     return;
   }
-  printf("tfsName: %c\n", tfsName[0]);
-  fflush(stdout);
 
   // Search for tfsName in directory
   int currentByte = 3;
@@ -267,9 +256,6 @@ void export_file(char **tokens) {
     }
     currentByte++;
   }
-
-  printf("currentByte: %d\n", currentByte);
-  fflush(stdout);
 
   int fileBlock;
 
@@ -286,13 +272,8 @@ void export_file(char **tokens) {
     fileBlock = currentDrive->block[parentBlock][currentByte] % 10;
   }
 
-  printf("fileBlock: %d\n", fileBlock);
-  fflush(stdout);
-
   // Get file size and determine how many blocks it uses
   int fileSize = currentDrive->block[fileBlock][0];
-  printf("fileSize: %d\n", fileSize);
-  fflush(stdout);
   int remainder = fileSize % 15;
   int blocksNeeded = (fileSize / 15);
   if (remainder > 0)
@@ -300,9 +281,6 @@ void export_file(char **tokens) {
   // If blocksNeeded > 1, add extra block for file index block
   if (blocksNeeded > 1)
     blocksNeeded++;
-
-  printf("blocksNeeded: %d\n", blocksNeeded);
-  fflush(stdout);
 
   // Create buffer to hold file contents
   char *fileContents = malloc(fileSize);
@@ -317,15 +295,12 @@ void export_file(char **tokens) {
       if (currentDrive->block[fileBlock][i] == 0) {
         i = 16;
       } else {
-        printf("before fileBlocks\n");
         fflush(stdout);
         fileBlocks[index] = (int)currentDrive->block[fileBlock][i];
         index++;
-        printf("fileBlocks[%d]: %d\n", index, fileBlocks[index]);
         fflush(stdout);
       }
     }
-    printf("after loop\n");
     fflush(stdout);
 
     // Read file contents into buffer
@@ -339,21 +314,16 @@ void export_file(char **tokens) {
   } else {
     int currIndex = 0;
     for (int j = 1; j < 16; j++) {
-      printf("before set\n");
       fflush(stdout);
       fileContents[currIndex] = (char)currentDrive->block[fileBlock][j];
       currIndex++;
-      printf("fileContents[%d]: %c\n", currIndex, fileContents[currIndex]);
       fflush(stdout);
     }
   }
 
-  printf("before write\n");
   fflush(stdout);
   // write buffer to real file system
   write(fileToImport, fileContents, fileSize);
-  printf("after write\n");
-  fflush(stdout);
 
   // Close LP file
   close(fileToImport);
@@ -558,9 +528,7 @@ int getBlock(char **path) {
     } else {
       int bl = currentDrive->block[currentBlock][currentByte];
       bl = bl % 10;
-      printf("even %d", currentDrive->block[currentBlock][currentByte]);
       currentBlock = currentDrive->block[currentBlock][currentByte] % 10;
-      printf("even %d", currentBlock);
     }
     currentByte = 3;
     currNameIndex++;
